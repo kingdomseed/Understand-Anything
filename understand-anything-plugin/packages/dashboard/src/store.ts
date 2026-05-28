@@ -739,8 +739,17 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       const willExpand = !next.has(containerId);
       if (willExpand) next.add(containerId);
       else next.delete(containerId);
+      const layoutNext = new Map(state.containerLayoutCache);
+      const sizeNext = new Map(state.containerSizeMemory);
+      if (!willExpand) {
+        layoutNext.delete(containerId);
+        sizeNext.delete(containerId);
+      }
       return {
         expandedContainers: next,
+        containerLayoutCache: layoutNext,
+        containerSizeMemory: sizeNext,
+        stage1Tick: willExpand ? state.stage1Tick : state.stage1Tick + 1,
         pendingFocusContainer: willExpand
           ? containerId
           : state.pendingFocusContainer,
@@ -758,9 +767,24 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       if (!state.expandedContainers.has(containerId)) return {};
       const next = new Set(state.expandedContainers);
       next.delete(containerId);
-      return { expandedContainers: next };
+      const layoutNext = new Map(state.containerLayoutCache);
+      layoutNext.delete(containerId);
+      const sizeNext = new Map(state.containerSizeMemory);
+      sizeNext.delete(containerId);
+      return {
+        expandedContainers: next,
+        containerLayoutCache: layoutNext,
+        containerSizeMemory: sizeNext,
+        stage1Tick: state.stage1Tick + 1,
+      };
     }),
-  collapseAllContainers: () => set({ expandedContainers: new Set() }),
+  collapseAllContainers: () =>
+    set((state) => ({
+      expandedContainers: new Set(),
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      stage1Tick: state.stage1Tick + 1,
+    })),
 
   containerLayoutCache: new Map(),
   setContainerLayout: (containerId, childPositions, actualSize) =>

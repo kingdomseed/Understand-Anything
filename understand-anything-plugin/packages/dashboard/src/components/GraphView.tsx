@@ -56,7 +56,7 @@ import { computeLayerStats } from "../utils/layerStats";
 import {
   analyzeDartArchitecture,
   dartArchitectureEdgeKey,
-  deriveDartArchitectureContainers,
+  deriveDartLayerDetailContainers,
   isDartArchitectureGraph,
   isDartProductionArchitectureEdge,
   isDartProductionNode,
@@ -68,6 +68,9 @@ const nodeTypes = {
   portal: PortalNode,
   container: ContainerNode,
 };
+
+const COLLAPSED_CONTAINER_WIDTH = NODE_WIDTH;
+const COLLAPSED_CONTAINER_HEIGHT = 88;
 
 import type { NodeCategory } from "../store";
 
@@ -503,7 +506,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     // Derive containers + bucket edges
     const { containers, ungrouped } = architectureView
-      ? deriveDartArchitectureContainers(filteredGraphNodes)
+      ? deriveDartLayerDetailContainers(filteredGraphNodes)
       : deriveContainers(filteredGraphNodes, filteredGraphEdges);
     const ungroupedSet = new Set(ungrouped);
     const nodeToContainer = new Map<string, string>();
@@ -541,24 +544,20 @@ function useLayerDetailTopology(): LayerDetailTopology & {
       }
     }
 
-    // Container size estimate (size memory takes priority).
-    // Caps prevent first-paint sprawl: at 100 children sqrt() yields
-    // ~3360px which renders as a huge empty box pre-expansion. Stage 2
-    // sets the actual size once it's measured, and Task 15 re-flows.
-    const STAGE1_MAX_CONTAINER_WIDTH = 800;
-    const STAGE1_MAX_CONTAINER_HEIGHT = 600;
+    // Collapsed containers are compact summary atoms. Stage 2 writes the
+    // measured expanded footprint to size memory, then Stage 1 reflows around
+    // the real size. Estimating from child count here renders large empty
+    // boxes before any child nodes are visible.
     const sizeMemory = useDashboardStore.getState().containerSizeMemory;
     const containerWidth = (c: DerivedContainer) => {
       const memo = sizeMemory.get(c.id)?.width;
       if (memo) return memo;
-      const estimate = Math.sqrt(c.nodeIds.length) * NODE_WIDTH * 1.2;
-      return Math.min(STAGE1_MAX_CONTAINER_WIDTH, Math.max(NODE_WIDTH, estimate));
+      return COLLAPSED_CONTAINER_WIDTH;
     };
     const containerHeight = (c: DerivedContainer) => {
       const memo = sizeMemory.get(c.id)?.height;
       if (memo) return memo;
-      const estimate = Math.sqrt(c.nodeIds.length) * NODE_HEIGHT * 1.2;
-      return Math.min(STAGE1_MAX_CONTAINER_HEIGHT, Math.max(NODE_HEIGHT, estimate));
+      return COLLAPSED_CONTAINER_HEIGHT;
     };
 
     // Build container flow nodes (children NOT rendered yet — Task 12)
@@ -923,22 +922,12 @@ function useLayerDetailTopology(): LayerDetailTopology & {
           // Pad for container chrome (header + border)
           const actualSize = { width: maxX + 40, height: maxY + 60 };
 
-          // Recompute the Stage 1 estimate for this container using the
-          // SAME formula `built` used so we know what Stage 1 actually
-          // routed against. (Memo if present, else sqrt-clamped estimate.)
+          // Recompute the Stage 1 size using the same compact-collapsed
+          // default `built` used. Once a layout is cached, memo reflects
+          // the measured expanded footprint.
           const memo = sizeMemoryBefore.get(containerId);
-          const STAGE1_MAX_W = 800;
-          const STAGE1_MAX_H = 600;
-          const stage1Width = memo?.width
-            ?? Math.min(
-              STAGE1_MAX_W,
-              Math.max(NODE_WIDTH, Math.sqrt(c.nodeIds.length) * NODE_WIDTH * 1.2),
-            );
-          const stage1Height = memo?.height
-            ?? Math.min(
-              STAGE1_MAX_H,
-              Math.max(NODE_HEIGHT, Math.sqrt(c.nodeIds.length) * NODE_HEIGHT * 1.2),
-            );
+          const stage1Width = memo?.width ?? COLLAPSED_CONTAINER_WIDTH;
+          const stage1Height = memo?.height ?? COLLAPSED_CONTAINER_HEIGHT;
           const dw = Math.abs(actualSize.width - stage1Width) / stage1Width;
           const dh = Math.abs(actualSize.height - stage1Height) / stage1Height;
           const deviated = dw > 0.2 || dh > 0.2;

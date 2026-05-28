@@ -8,6 +8,7 @@ import {
   analyzeDartArchitecture,
   classifyDartArchitectureFilePath,
   deriveDartArchitectureContainers,
+  deriveDartLayerDetailContainers,
   isDartArchitectureGraph,
   isDartProductionArchitectureEdge,
   isDartProductionFilePath,
@@ -79,6 +80,46 @@ describe("Dart architecture helpers", () => {
     ]);
     expect(containers.every((c) => c.strategy === "folder")).toBe(true);
     expect(ungrouped.sort()).toEqual(["data-a", "single"]);
+  });
+
+  it("groups files inside an architecture layer by package-internal folders", () => {
+    const nodes = [
+      file("barrel", "packages/mythic_vault_index/lib/mythic_vault_index.dart"),
+      file("root", "packages/mythic_vault_index/lib/src/default_vault_reconciler.dart"),
+      file("dao-a", "packages/mythic_vault_index/lib/src/drift/daos/list_item_dao.dart"),
+      file("dao-b", "packages/mythic_vault_index/lib/src/drift/daos/scene_dao.dart"),
+      file("table-a", "packages/mythic_vault_index/lib/src/drift/tables/list_items_table.dart"),
+      file("table-b", "packages/mythic_vault_index/lib/src/drift/tables/scenes_table.dart"),
+      file("indexer-a", "packages/mythic_vault_index/lib/src/indexers/list_indexer.dart"),
+      file("indexer-b", "packages/mythic_vault_index/lib/src/indexers/scene_indexer.dart"),
+    ];
+
+    const { containers, ungrouped } = deriveDartLayerDetailContainers(nodes);
+
+    expect(containers.map((c) => c.name).sort()).toEqual([
+      "drift/daos",
+      "drift/tables",
+      "indexers",
+      "root",
+    ]);
+    expect(containers.find((c) => c.name === "drift/daos")?.nodeIds.sort()).toEqual([
+      "dao-a",
+      "dao-b",
+    ]);
+    expect(containers.some((c) => c.name === "Data: mythic_vault_index")).toBe(false);
+    expect(ungrouped).toEqual([]);
+  });
+
+  it("does not create a redundant detail container when all files share one internal group", () => {
+    const nodes = [
+      file("a", "packages/mythic_vault_api/lib/src/vault_failure.dart"),
+      file("b", "packages/mythic_vault_api/lib/src/vault_metadata.dart"),
+    ];
+
+    const { containers, ungrouped } = deriveDartLayerDetailContainers(nodes);
+
+    expect(containers).toEqual([]);
+    expect(ungrouped.sort()).toEqual(["a", "b"]);
   });
 
   it("classifies files into deterministic architecture roles", () => {

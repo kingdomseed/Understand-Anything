@@ -502,3 +502,95 @@ export function deriveDartArchitectureContainers(nodes: GraphNode[]): DeriveResu
 
   return { containers, ungrouped };
 }
+
+function sanitizeContainerId(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function packageInternalGroupName(filePath: string): string {
+  const path = normalizePath(filePath);
+  let relative: string | null = null;
+
+  const packageMatch = path.match(/^packages\/[^/]+\/lib\/(.+)$/);
+  if (packageMatch) {
+    relative = packageMatch[1];
+  }
+
+  const appLibMatch = path.match(/^apps\/[^/]+\/lib\/(.+)$/);
+  if (!relative && appLibMatch) {
+    relative = appLibMatch[1];
+  }
+
+  const appBinMatch = path.match(/^apps\/[^/]+\/bin\/(.+)$/);
+  if (!relative && appBinMatch) {
+    return "bin";
+  }
+
+  const rootLibMatch = path.match(/^lib\/(.+)$/);
+  if (!relative && rootLibMatch) {
+    relative = rootLibMatch[1];
+  }
+
+  if (!relative) {
+    return classifyDartArchitectureFilePath(path).bucket;
+  }
+
+  if (!relative.includes("/")) {
+    return "root";
+  }
+
+  if (relative.startsWith("src/")) {
+    const parts = relative.slice("src/".length).split("/").filter(Boolean);
+    if (parts.length <= 1) return "root";
+    return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0];
+  }
+
+  const parts = relative.split("/").filter(Boolean);
+  if (parts.length <= 1) return "root";
+  return parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0];
+}
+
+/**
+ * Groups nodes inside an already-selected Dart architecture layer.
+ *
+ * The overview layer is already the VGV bucket. Re-applying architecture
+ * classification inside that layer collapses every file into one same-name
+ * container, producing a large empty box. Detail view instead uses stable
+ * package/app-internal path groups such as `drift/daos`, `drift/tables`,
+ * `indexers`, `commands`, or `tui/interactive`.
+ */
+export function deriveDartLayerDetailContainers(nodes: GraphNode[]): DeriveResult {
+  const buckets = new Map<string, string[]>();
+  const nodeIds = nodes.map((node) => node.id);
+
+  for (const node of nodes) {
+    if (!node.filePath) continue;
+    const name = packageInternalGroupName(node.filePath);
+    const ids = buckets.get(name) ?? [];
+    ids.push(node.id);
+    buckets.set(name, ids);
+  }
+
+  if (buckets.size <= 1) {
+    return { containers: [], ungrouped: nodeIds };
+  }
+
+  const containers: DerivedContainer[] = [];
+  const ungrouped: string[] = [];
+  for (const [name, ids] of [...buckets.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0]),
+  )) {
+    if (ids.length === 1) {
+      ungrouped.push(ids[0]);
+      continue;
+    }
+    containers.push({
+      id: `container:dart-detail:${sanitizeContainerId(name)}`,
+      name,
+      nodeIds: ids,
+      strategy: "folder",
+    });
+  }
+
+  return { containers, ungrouped };
+}
