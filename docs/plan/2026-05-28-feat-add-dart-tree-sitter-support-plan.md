@@ -236,6 +236,74 @@ Acceptance criteria:
 - Evaluate Dart Analyzer or `scip_dart` as an authoritative semantic sidecar that emits JSON/SCIP into the TypeScript graph builder.
 - Add an architecture diagnostics panel that lists violations in text, not only red graph edges.
 
+## Small Local Roundtrip
+
+Use this smaller loop for each slice instead of the full VGV PR roundtrip. The goal is fast local confidence without opening a GitHub PR until the fork is worth upstreaming.
+
+For each slice:
+
+1. Confirm the slice scope from this plan and state the files expected to change.
+2. Implement only that slice.
+3. Run the slice-specific tests named above.
+4. Run the package/workspace build commands named above.
+5. Run `git diff --check`.
+6. Run local review before moving on:
+   - run `/review` against the changed files;
+   - run adversarial review agents with focused prompts, not the full thread;
+   - run `npx devin review` if the Devin CLI is installed/authenticated for this repo.
+7. Fix actionable findings.
+8. Rerun the failed checks and the main slice checks.
+9. Commit and push the branch to `origin`.
+10. Stop and report:
+    - what passed;
+    - what reviewers found;
+    - what was fixed;
+    - what remains risky;
+    - whether the next slice is buildable.
+
+Do not open a PR by default. A PR is optional after the local loop is clean.
+
+Recommended local review agents by slice:
+
+- PR 1: codebase researcher for parser integration, test-quality reviewer for import-map fixtures, code-simplicity reviewer for fallback handling.
+- PR 2: codebase researcher for Dart AST node coverage, test-quality reviewer for extractor coverage, code-simplicity reviewer for over-claiming semantic relationships.
+- PR 3: architecture reviewer for dashboard diagnostic boundaries, test-quality reviewer for fallback and graph fixture tests.
+
+## Mythic Repo Validation Gate
+
+Do not use the Mythic repo as the first proof. Use unit and fixture tests in the fork first.
+
+We can build and test this on `/Users/jholt/development/jhd-business/mythic_gme_apps` after PR 1 passes the local roundtrip because PR 1 is the first point where Dart imports should be tree-sitter-derived end to end.
+
+Minimum readiness before Mythic validation:
+
+- `tree-sitter-dart` grammar load is proven under this repo's `web-tree-sitter`.
+- `DartExtractor` extracts import/export/part directives from real `.dart` fixtures.
+- `extract-import-map.mjs` uses parsed Dart imports as the normal path.
+- local `package:` imports resolve through scanned `pubspec.yaml` roots.
+- full fork checks for PR 1 pass:
+
+```bash
+pnpm --filter @understand-anything/core test
+pnpm --filter @understand-anything/core build
+pnpm test
+pnpm build
+git diff --check
+```
+
+Mythic validation procedure after PR 1:
+
+1. Ensure the active local install points at this fork/branch.
+2. From `/Users/jholt/development/jhd-business/mythic_gme_apps`, run a full graph rebuild with the forked plugin.
+3. Confirm the generated graph includes Dart import edges between real Mythic files.
+4. Confirm architecture mode is using deterministic VGV buckets rather than Louvain cluster labels.
+5. Confirm obvious external/platform imports are not being turned into fake project-internal edges.
+6. Launch the dashboard and inspect whether the graph is useful enough to identify real cross-layer spaghetti.
+
+Mythic validation after PR 2 should additionally confirm file/class structure is tree-sitter-derived and materially better than the previous fallback.
+
+Mythic validation after PR 3 should additionally confirm fallback/degraded state is visible if Dart tree-sitter is unavailable.
+
 ## Review Notes Incorporated
 
 - Plan-splitting review recommended three PRs rather than one broad parser/dashboard change.
@@ -257,10 +325,14 @@ Before wiring dartConfig, prove the Dart WASM loads with the repo's current web-
 
 Do not implement PR 2 structure/call extraction or PR 3 dashboard/fallback revalidation except for the minimum loud warning needed to avoid silent degraded output in PR 1.
 
+Use the Small Local Roundtrip section before moving to PR 2. Do not open a PR by default.
+
 Run:
 pnpm --filter @understand-anything/core test
 pnpm --filter @understand-anything/core build
 pnpm test
 pnpm build
 git diff --check
+
+After these checks and local reviews pass, run the Mythic Repo Validation Gate.
 ```
