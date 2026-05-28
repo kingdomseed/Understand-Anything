@@ -36,7 +36,7 @@
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "3.2.4",
     "tree-sitter-cli": "0.26.6",
-    "tree-sitter-dart": "1.0.0",
+    "tree-sitter-dart": "github:UserNobody14/tree-sitter-dart#a9bdfa3db2fbc9b9f12c93450d04a671f33a5102",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   },

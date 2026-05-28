@@ -72,6 +72,47 @@ async function main() {
   registry.register(tsPlugin);
   registerAllParsers(registry);
 
+  const hasDartFiles = batchFiles.some(file => file.language === 'dart');
+  let dartTreeSitterReady = false;
+  let dartFallbackWarned = false;
+  const errorMessage = (err) => (
+    err && typeof err.message === 'string' ? err.message : String(err)
+  );
+  const warnDartFallback = (reason) => {
+    if (dartFallbackWarned) return;
+    dartFallbackWarned = true;
+    process.stderr.write(
+      `Warning: extract-structure: tree-sitter-dart unavailable during structure phase ` +
+      `(${reason}) — using degraded Dart structure scanner — Dart graph structure may be incomplete\n`,
+    );
+  };
+  if (hasDartFiles) {
+    try {
+      const smoke = registry.analyzeFile(
+        '__ua_dart_structure_smoke.dart',
+        'class __UaDartSmoke {}\n' +
+        'void __uaDartSmokeFn() {}\n' +
+        'enum __UaDartSmokeStatus {\n' +
+        '  ready(1), failed(2);\n' +
+        '  const __UaDartSmokeStatus(this.code);\n' +
+        '  final int code;\n' +
+        '  bool get isReady => this == __UaDartSmokeStatus.ready;\n' +
+        '}\n',
+      );
+      const smokeStatus = smoke?.classes?.find(cls => cls.name === '__UaDartSmokeStatus');
+      dartTreeSitterReady =
+        smoke?.classes?.some(cls => cls.name === '__UaDartSmoke') === true &&
+        smoke?.functions?.some(fn => fn.name === '__uaDartSmokeFn') === true &&
+        smokeStatus?.properties?.includes('failed') === true &&
+        smokeStatus?.methods?.includes('get isReady') === true;
+      if (!dartTreeSitterReady) {
+        warnDartFallback('Dart grammar did not produce required declarations');
+      }
+    } catch (err) {
+      warnDartFallback(errorMessage(err));
+    }
+  }
+
   const results = [];
   const filesSkipped = [];
 
@@ -98,21 +139,14 @@ async function main() {
     let analysis = null;
     try {
       analysis = registry.analyzeFile(file.path, content);
-    } catch {
-      // If analysis throws, treat as degraded — still include basic metrics
-    }
-    if (file.language === 'dart') {
-      const hasDartStructure = analysis &&
-        (
-          (analysis.functions?.length ?? 0) > 0 ||
-          (analysis.classes?.length ?? 0) > 0 ||
-          (analysis.exports?.length ?? 0) > 0
-        );
-      if (!hasDartStructure) {
+    } catch (err) {
+      if (file.language === 'dart') {
+        warnDartFallback(`Dart analysis failed for ${file.path}: ${errorMessage(err)}`);
         analysis = analyzeDartFile(content);
       }
     }
-    if (!analysis && file.language === 'dart') {
+    if (file.language === 'dart' && !dartTreeSitterReady) {
+      warnDartFallback('Dart grammar is not loaded');
       analysis = analyzeDartFile(content);
     }
 
@@ -128,8 +162,10 @@ async function main() {
             lineNumber: entry.lineNumber,
           }));
         }
-      } catch {
-        // Call graph extraction failed — non-fatal
+      } catch (err) {
+        if (file.language === 'dart') {
+          warnDartFallback(`Dart call graph extraction failed for ${file.path}: ${errorMessage(err)}`);
+        }
       }
     }
 
@@ -320,10 +356,10 @@ export function buildResult(file, totalLines, nonEmptyLines, analysis, callGraph
 // ---------------------------------------------------------------------------
 // Dart structural extraction
 //
-// Core currently has no Dart tree-sitter grammar. Keep Dart first-class here
-// instead of returning empty metrics: extract top-level declarations,
-// classes/mixins/enums/extensions, and public exports deterministically from
-// literal source text.
+// Degraded Dart structural extraction.
+//
+// The normal path is core's tree-sitter DartExtractor. This fallback is used
+// only when the Dart grammar cannot prove it emits declarations.
 // ---------------------------------------------------------------------------
 
 function stripDartComments(content) {

@@ -191,6 +191,30 @@ describe("compareFingerprints", () => {
     expect(result.details).toContain("params changed: main");
   });
 
+  it("detects removal of one Dart private accessor when the paired accessor remains", () => {
+    const oldFp: FileFingerprint = {
+      ...baseFp,
+      contentHash: "old",
+      functions: [
+        { name: "get _title", params: [], returnType: "String", exported: false, lineCount: 1 },
+        { name: "set _title", params: ["value"], exported: false, lineCount: 1 },
+      ],
+      exports: [],
+    };
+    const newFp: FileFingerprint = {
+      ...oldFp,
+      contentHash: "new",
+      functions: [
+        { name: "get _title", params: [], returnType: "String", exported: false, lineCount: 1 },
+      ],
+    };
+
+    const result = compareFingerprints(oldFp, newFp);
+
+    expect(result.changeLevel).toBe("STRUCTURAL");
+    expect(result.details).toContain("removed function: set _title");
+  });
+
   it("detects export status changes", () => {
     const newFp: FileFingerprint = {
       ...baseFp,
@@ -428,14 +452,38 @@ describe("analyzeChanges", () => {
 });
 
 describe("buildFingerprintStore", () => {
-  it("keeps Dart import-only analysis conservative until declarations are extracted", () => {
+  it("uses Dart structural analysis once the extractor emits declarations", () => {
     mockedExistsSync.mockReturnValue(true);
     mockedReadFileSync.mockReturnValue("import './foo.dart';\nclass App {}\n");
     const registry = {
       analyzeFile: vi.fn().mockReturnValue({
         functions: [],
-        classes: [],
+        classes: [{ name: "App", lineRange: [2, 2], methods: [], properties: [] }],
         imports: [{ source: "./foo.dart", specifiers: [], lineNumber: 1 }],
+        exports: [{ name: "App", lineNumber: 2 }],
+      }),
+    } as any;
+
+    const store = buildFingerprintStore(
+      "/project",
+      ["lib/main.dart"],
+      registry,
+      "abc123",
+    );
+
+    expect(store.files["lib/main.dart"].hasStructuralAnalysis).toBe(true);
+    expect(store.files["lib/main.dart"].functions).toEqual([]);
+    expect(store.files["lib/main.dart"].classes[0].name).toBe("App");
+  });
+
+  it("keeps empty Dart parser results conservative when grammar support is unavailable", () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue("class App {}\n");
+    const registry = {
+      analyzeFile: vi.fn().mockReturnValue({
+        functions: [],
+        classes: [],
+        imports: [],
         exports: [],
       }),
     } as any;
@@ -448,7 +496,29 @@ describe("buildFingerprintStore", () => {
     );
 
     expect(store.files["lib/main.dart"].hasStructuralAnalysis).toBe(false);
-    expect(store.files["lib/main.dart"].functions).toEqual([]);
-    expect(store.files["lib/main.dart"].classes).toEqual([]);
+  });
+
+  it("keeps Dart directive-only parser results conservative", () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue("import './foo.dart';\nexport './bar.dart';\n");
+    const registry = {
+      analyzeFile: vi.fn().mockReturnValue({
+        functions: [],
+        classes: [],
+        imports: [{ source: "./foo.dart", specifiers: [], lineNumber: 1 }],
+        exports: [{ name: "./bar.dart", lineNumber: 2 }],
+      }),
+    } as any;
+
+    const store = buildFingerprintStore(
+      "/project",
+      ["lib/main.dart"],
+      registry,
+      "abc123",
+    );
+
+    expect(store.files["lib/main.dart"].hasStructuralAnalysis).toBe(false);
+    expect(store.files["lib/main.dart"].imports).toEqual([]);
+    expect(store.files["lib/main.dart"].exports).toEqual([]);
   });
 });

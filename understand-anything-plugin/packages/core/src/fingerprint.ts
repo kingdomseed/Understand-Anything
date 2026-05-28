@@ -140,13 +140,9 @@ function hasUsableStructuralAnalysis(
 ): analysis is StructuralAnalysis {
   if (!analysis) return false;
 
-  // Dart is currently import-edge-only. Until the Dart extractor emits
-  // declarations, keep auto-update conservative so declaration edits do not
-  // get classified as cosmetic.
   if (filePath.endsWith(".dart")) {
     return analysis.functions.length > 0 ||
-      analysis.classes.length > 0 ||
-      analysis.exports.length > 0;
+      analysis.classes.length > 0;
   }
 
   return true;
