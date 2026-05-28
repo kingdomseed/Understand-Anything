@@ -1,5 +1,38 @@
 <h1 align="center">Understand Anything</h1>
 
+> [!IMPORTANT]
+> **Fork note: Dart/Flutter support branch.**
+>
+> This fork branch adds first-class Dart/Flutter extraction work that is not yet in upstream `Lum1104/Understand-Anything`:
+>
+> - Dart parsing through a pinned `tree-sitter-dart` WebAssembly grammar.
+> - Dart `import`/`export`/`part` graph extraction, including `package:` imports across local `pubspec.yaml` package roots in monorepos.
+> - Dart structure extraction for files, classes, mixins, extensions, enhanced enums, methods, accessors, top-level functions, exports, and call references.
+> - Loud degraded-mode warnings when Dart tree-sitter support is unavailable, instead of silently producing weak fallback output.
+> - Dashboard architecture mode tuned for Dart/Flutter/VGV-style monorepos, including deterministic Data / Repository / Business Logic / Presentation / CLI / shared UI buckets and useful package-internal grouping when drilling into a layer.
+>
+> Use this branch when testing Dart/Flutter repositories:
+>
+> ```bash
+> git clone --branch codex/dart-tree-sitter-plan --single-branch \
+>   https://github.com/kingdomseed/Understand-Anything.git \
+>   ~/.understand-anything/repo
+>
+> cd ~/.understand-anything/repo
+> corepack enable
+> corepack pnpm install --frozen-lockfile
+> corepack pnpm --filter @understand-anything/core build
+> ./install.sh codex
+> ```
+>
+> Need-to-know caveats:
+>
+> - Do not use the upstream marketplace install or the upstream one-line installer if you want these Dart changes; those install `Lum1104/Understand-Anything`, not this fork branch.
+> - Requires Node.js 22+ and pnpm via Corepack.
+> - If you already installed Understand Anything, remove or replace stale symlinks such as `~/.understand-anything-plugin` before testing this fork.
+> - The architecture buckets are deterministic heuristics over paths/imports, not a full Dart analyzer semantic model. They are meant to reveal likely layer shape and suspicious dependencies, not prove correctness by themselves.
+> - Large expanded layers can still be visually dense; use Architecture overview, layer drill-down, search, and focused expansion together.
+>
 <p align="center">
   <strong>Turn any codebase, knowledge base, or docs into an interactive knowledge graph you can explore, search, and ask questions about.</strong>
   <br />
