@@ -8,6 +8,7 @@ import { z } from "zod";
 export const TreeSitterConfigSchema = z.object({
   wasmPackage: z.string(),
   wasmFile: z.string(),
+  wasmPath: z.string().optional(),
 });
 
 export type TreeSitterConfig = z.infer<typeof TreeSitterConfigSchema>;

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { dirname, resolve, extname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   AnalyzerPlugin,
   StructuralAnalysis,
@@ -12,9 +13,24 @@ import { builtinExtractors } from "./extractors/index.js";
 
 // web-tree-sitter uses CJS internally; we need createRequire for .wasm resolution
 const require = createRequire(import.meta.url);
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 type TreeSitterParser = import("web-tree-sitter").Parser;
 type TreeSitterLanguage = import("web-tree-sitter").Language;
+
+function resolveGrammarWasm(config: LanguageConfig): string {
+  if (!config.treeSitter) {
+    throw new Error(`tree-sitter config missing for ${config.id}`);
+  }
+
+  if (config.treeSitter.wasmPath) {
+    return resolve(packageRoot, config.treeSitter.wasmPath);
+  }
+
+  return require.resolve(
+    `${config.treeSitter.wasmPackage}/${config.treeSitter.wasmFile}`,
+  );
+}
 
 /**
  * Config-driven tree-sitter plugin.
@@ -140,9 +156,7 @@ export class TreeSitterPlugin implements AnalyzerPlugin {
 
         const loadGrammar = async () => {
           try {
-            const wasmPath = require.resolve(
-              `${config.treeSitter!.wasmPackage}/${config.treeSitter!.wasmFile}`,
-            );
+            const wasmPath = resolveGrammarWasm(config);
             const lang = await LanguageCls.load(wasmPath);
             this._languages.set(config.id, lang);
 

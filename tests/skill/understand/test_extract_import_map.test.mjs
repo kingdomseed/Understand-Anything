@@ -344,6 +344,168 @@ describe('extract-import-map.mjs — TypeScript / JavaScript resolver', () => {
   });
 });
 
+describe('extract-import-map.mjs — Dart resolver', () => {
+  let projectRoot;
+
+  afterEach(() => {
+    if (projectRoot) {
+      rmSync(projectRoot, { recursive: true, force: true });
+      projectRoot = null;
+    }
+  });
+
+  it('resolves Dart package, relative, export, and part directives through tree-sitter', () => {
+    projectRoot = setupTree({
+      'pubspec.yaml': 'name: demo_app\n',
+      'lib/main.dart':
+        `import 'dart:async';\n` +
+        `import 'package:demo_app/src/foo.dart';\n` +
+        `import './src/bar.dart';\n` +
+        `import 'src/io.dart' if (dart.library.html) 'src/web.dart';\n` +
+        `export 'src/public.dart';\n` +
+        `part 'main.g.dart';\n`,
+      'lib/src/foo.dart': `class Foo {}\n`,
+      'lib/src/bar.dart': `class Bar {}\n`,
+      'lib/src/io.dart': `class IoThing {}\n`,
+      'lib/src/web.dart': `class WebThing {}\n`,
+      'lib/src/public.dart': `class Public {}\n`,
+      'lib/main.g.dart': `part of 'main.dart';\n`,
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'pubspec.yaml', language: 'yaml', fileCategory: 'config' },
+        { path: 'lib/main.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/src/foo.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/src/bar.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/src/io.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/src/web.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/src/public.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/main.g.dart', language: 'dart', fileCategory: 'code' },
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/degraded Dart directive scanner/);
+    expect(result.output.importMap['lib/main.dart']).toEqual([
+      'lib/main.g.dart',
+      'lib/src/bar.dart',
+      'lib/src/foo.dart',
+      'lib/src/io.dart',
+      'lib/src/public.dart',
+      'lib/src/web.dart',
+    ]);
+  });
+
+  it('resolves Dart package imports across local pubspec roots with quoted names', () => {
+    projectRoot = setupTree({
+      'apps/app/pubspec.yaml': 'name: "app" # app package\n',
+      'packages/shared/pubspec.yaml': "name: 'shared' # shared package\n",
+      'apps/app/lib/main.dart':
+        `import 'package:shared/shared.dart';\n` +
+        `import 'package:flutter/material.dart';\n`,
+      'packages/shared/lib/shared.dart': `class SharedThing {}\n`,
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'apps/app/pubspec.yaml', language: 'yaml', fileCategory: 'config' },
+        { path: 'packages/shared/pubspec.yaml', language: 'yaml', fileCategory: 'config' },
+        { path: 'apps/app/lib/main.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'packages/shared/lib/shared.dart', language: 'dart', fileCategory: 'code' },
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.output.importMap['apps/app/lib/main.dart']).toEqual([
+      'packages/shared/lib/shared.dart',
+    ]);
+  });
+
+  it('does not create Dart edges from comments or strings', () => {
+    projectRoot = setupTree({
+      'pubspec.yaml': 'name: demo_app\n',
+      'lib/main.dart':
+        `import './real.dart';\n` +
+        `// import './fake.dart';\n` +
+        `/* export './also_fake.dart'; */\n` +
+        `const text = "import './string_fake.dart';";\n`,
+      'lib/real.dart': `class Real {}\n`,
+      'lib/fake.dart': `class Fake {}\n`,
+      'lib/also_fake.dart': `class AlsoFake {}\n`,
+      'lib/string_fake.dart': `class StringFake {}\n`,
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'pubspec.yaml', language: 'yaml', fileCategory: 'config' },
+        { path: 'lib/main.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/real.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/fake.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/also_fake.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'lib/string_fake.dart', language: 'dart', fileCategory: 'code' },
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/degraded Dart directive scanner/);
+    expect(result.output.importMap['lib/main.dart']).toEqual(['lib/real.dart']);
+  });
+
+  it('warns and uses degraded Dart fallback when only the Dart grammar is unavailable', () => {
+    projectRoot = setupTree({
+      'pubspec.yaml': 'name: demo_app\n',
+      'lib/main.dart': `import './real.dart';\n`,
+      'lib/real.dart': `class Real {}\n`,
+    });
+
+    const hookPath = join(projectRoot, 'ua-eim-dart-fail-hook.mjs');
+    const loaderPath = join(projectRoot, 'ua-eim-dart-fail-loader.mjs');
+    writeFileSync(
+      hookPath,
+      `export async function load(url, ctx, nextLoad) {\n` +
+      `  const result = await nextLoad(url, ctx);\n` +
+      `  if (url.endsWith('/dist/languages/configs/dart.js')) {\n` +
+      `    return {\n` +
+      `      ...result,\n` +
+      `      source: String(result.source).replace('vendor/tree-sitter-dart.wasm', 'vendor/missing-dart.wasm'),\n` +
+      `    };\n` +
+      `  }\n` +
+      `  return result;\n` +
+      `}\n`,
+      'utf-8',
+    );
+    writeFileSync(
+      loaderPath,
+      `import { register } from 'node:module';\n` +
+      `import { pathToFileURL } from 'node:url';\n` +
+      `register(pathToFileURL(${JSON.stringify(hookPath)}).href);\n`,
+      'utf-8',
+    );
+
+    const result = runScript(
+      projectRoot,
+      {
+        projectRoot,
+        files: [
+          { path: 'pubspec.yaml', language: 'yaml', fileCategory: 'config' },
+          { path: 'lib/main.dart', language: 'dart', fileCategory: 'code' },
+          { path: 'lib/real.dart', language: 'dart', fileCategory: 'code' },
+        ],
+      },
+      ['--import', loaderPath],
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toMatch(/tree-sitter-dart unavailable during import map phase/);
+    expect(result.stderr).toMatch(/degraded Dart directive scanner/);
+    expect(result.output.importMap['lib/main.dart']).toEqual(['lib/real.dart']);
+  });
+});
+
 describe('extract-import-map.mjs — Python resolver', () => {
   let projectRoot;
 

@@ -123,7 +123,7 @@ describe('scan-project.mjs — language detection', () => {
     expect(byPath(r.output, 'f.cjs').language).toBe('javascript');
   });
 
-  it('maps Python, Go, Rust, Java, Kotlin, C# to their language ids', () => {
+  it('maps Python, Go, Rust, Java, Kotlin, C#, Dart to their language ids', () => {
     projectRoot = setupTree({
       'a.py': 'x = 1\n',
       'b.go': 'package main\n',
@@ -131,6 +131,7 @@ describe('scan-project.mjs — language detection', () => {
       'd.java': 'class D {}\n',
       'e.kt': 'fun main() {}\n',
       'f.cs': 'class F {}\n',
+      'g.dart': 'void main() {}\n',
     });
     const r = runScript(projectRoot);
     expect(r.status).toBe(0);
@@ -140,6 +141,7 @@ describe('scan-project.mjs — language detection', () => {
     expect(byPath(r.output, 'd.java').language).toBe('java');
     expect(byPath(r.output, 'e.kt').language).toBe('kotlin');
     expect(byPath(r.output, 'f.cs').language).toBe('csharp');
+    expect(byPath(r.output, 'g.dart').language).toBe('dart');
   });
 
   it('maps Ruby, PHP, C, C++ to their language ids', () => {
@@ -241,12 +243,13 @@ describe('scan-project.mjs — category assignment (project-scanner.md Step 4)',
     }
   });
 
-  it('assigns code to TypeScript, JavaScript, Python, Go, Rust source files', () => {
+  it('assigns code to TypeScript, JavaScript, Python, Go, Rust, Dart source files', () => {
     projectRoot = setupTree({
       'src/a.ts': 'export const a = 1;\n',
       'src/b.py': 'def b(): pass\n',
       'src/c.go': 'package main\n',
       'src/d.rs': 'fn main() {}\n',
+      'src/e.dart': 'void main() {}\n',
     });
     const r = runScript(projectRoot);
     expect(r.status).toBe(0);
@@ -254,6 +257,7 @@ describe('scan-project.mjs — category assignment (project-scanner.md Step 4)',
     expect(byPath(r.output, 'src/b.py').fileCategory).toBe('code');
     expect(byPath(r.output, 'src/c.go').fileCategory).toBe('code');
     expect(byPath(r.output, 'src/d.rs').fileCategory).toBe('code');
+    expect(byPath(r.output, 'src/e.dart').fileCategory).toBe('code');
   });
 
   it('assigns config to JSON/YAML/TOML/INI/XML', () => {

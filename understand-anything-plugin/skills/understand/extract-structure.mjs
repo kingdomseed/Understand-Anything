@@ -101,6 +101,17 @@ async function main() {
     } catch {
       // If analysis throws, treat as degraded — still include basic metrics
     }
+    if (file.language === 'dart') {
+      const hasDartStructure = analysis &&
+        (
+          (analysis.functions?.length ?? 0) > 0 ||
+          (analysis.classes?.length ?? 0) > 0 ||
+          (analysis.exports?.length ?? 0) > 0
+        );
+      if (!hasDartStructure) {
+        analysis = analyzeDartFile(content);
+      }
+    }
     if (!analysis && file.language === 'dart') {
       analysis = analyzeDartFile(content);
     }

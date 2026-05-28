@@ -4,6 +4,7 @@ import {
   contentHash,
   extractFileFingerprint,
   compareFingerprints,
+  buildFingerprintStore,
   analyzeChanges,
   type FileFingerprint,
   type FingerprintStore,
@@ -423,5 +424,31 @@ describe("analyzeChanges", () => {
 
     expect(result.deletedFiles).toHaveLength(0);
     expect(result.fileChanges).toHaveLength(0);
+  });
+});
+
+describe("buildFingerprintStore", () => {
+  it("keeps Dart import-only analysis conservative until declarations are extracted", () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReadFileSync.mockReturnValue("import './foo.dart';\nclass App {}\n");
+    const registry = {
+      analyzeFile: vi.fn().mockReturnValue({
+        functions: [],
+        classes: [],
+        imports: [{ source: "./foo.dart", specifiers: [], lineNumber: 1 }],
+        exports: [],
+      }),
+    } as any;
+
+    const store = buildFingerprintStore(
+      "/project",
+      ["lib/main.dart"],
+      registry,
+      "abc123",
+    );
+
+    expect(store.files["lib/main.dart"].hasStructuralAnalysis).toBe(false);
+    expect(store.files["lib/main.dart"].functions).toEqual([]);
+    expect(store.files["lib/main.dart"].classes).toEqual([]);
   });
 });

@@ -24,7 +24,7 @@ import re
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 
 # ── Configuration ─────────────────────────────────────────────────────────
@@ -131,7 +131,7 @@ def _num(v: Any) -> float:
 
 # ── Batch loading ─────────────────────────────────────────────────────────
 
-def load_batch(path: Path) -> dict[str, Any] | None:
+def load_batch(path: Path) -> Optional[dict[str, Any]]:
     """Load a batch JSON file, tolerating malformed files."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -307,7 +307,7 @@ def is_test_path(path: str) -> bool:
     )
 
 
-def _strip_test_infix(stem: str) -> str | None:
+def _strip_test_infix(stem: str) -> Optional[str]:
     """For a JS/TS-family stem like `foo.test` or `foo.spec`, strip the
     trailing `.test` / `.spec`. Returns None if no infix is present."""
     for infix in (".test", ".spec"):
@@ -506,7 +506,7 @@ def production_candidates(test_path: str) -> list[str]:
     return candidates
 
 
-def _file_node_path(node: dict[str, Any]) -> str | None:
+def _file_node_path(node: dict[str, Any]) -> Optional[str]:
     """Return the relative project path for a `file:`-prefixed node, else None."""
     nid = node.get("id", "")
     if not isinstance(nid, str) or not nid.startswith("file:"):

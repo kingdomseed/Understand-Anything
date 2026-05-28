@@ -27,12 +27,16 @@
     }
   },
   "scripts": {
+    "build:dart-wasm": "tree-sitter build --wasm --output vendor/tree-sitter-dart.wasm node_modules/tree-sitter-dart",
+    "check:dart-wasm": "node scripts/check-dart-wasm.mjs",
     "build": "tsc",
     "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "3.2.4",
+    "tree-sitter-cli": "0.26.6",
+    "tree-sitter-dart": "1.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.1.0"
   },

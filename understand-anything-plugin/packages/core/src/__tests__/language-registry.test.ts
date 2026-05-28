@@ -49,10 +49,10 @@ describe("LanguageRegistry", () => {
   });
 
   describe("createDefault", () => {
-    it("registers all 40 built-in language configs", () => {
+    it("registers all 41 built-in language configs", () => {
       const registry = LanguageRegistry.createDefault();
       const all = registry.getAllLanguages();
-      expect(all.length).toBe(40);
+      expect(all.length).toBe(41);
     });
 
     it("maps all expected extensions", () => {
@@ -71,6 +71,7 @@ describe("LanguageRegistry", () => {
       expect(registry.getByExtension(".c")?.id).toBe("c");
       expect(registry.getByExtension(".h")?.id).toBe("c");
       expect(registry.getByExtension(".lua")?.id).toBe("lua");
+      expect(registry.getByExtension(".dart")?.id).toBe("dart");
       expect(registry.getByExtension(".js")?.id).toBe("javascript");
     });
 

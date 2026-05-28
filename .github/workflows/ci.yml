@@ -26,6 +26,9 @@ jobs:
       - name: Build core
         run: pnpm --filter @understand-anything/core build
 
+      - name: Check vendored Dart grammar
+        run: pnpm --filter @understand-anything/core check:dart-wasm
+
       - name: Build skill
         run: pnpm --filter @understand-anything/skill build
 

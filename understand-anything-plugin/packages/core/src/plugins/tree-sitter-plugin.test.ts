@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { TreeSitterPlugin } from "./tree-sitter-plugin.js";
+import { dartConfig } from "../languages/configs/dart.js";
 
 describe("TreeSitterPlugin", () => {
   let plugin: TreeSitterPlugin;
@@ -259,6 +260,28 @@ import * as path from 'path';
       expect(result[2].source).toBe("path");
       expect(result[2].resolvedPath).toBe("path");
       expect(result[2].specifiers).toEqual(["* as path"]);
+    });
+  });
+
+  describe("configured languages", () => {
+    it("dispatches Dart files through the configured Dart extractor", async () => {
+      const dartPlugin = new TreeSitterPlugin([dartConfig]);
+      await dartPlugin.init();
+
+      const result = dartPlugin.analyzeFile(
+        "lib/main.dart",
+        `
+import 'package:demo/src/foo.dart';
+export 'src/public.dart';
+part 'main.g.dart';
+`,
+      );
+
+      expect(result.imports.map((imp) => imp.source)).toEqual([
+        "package:demo/src/foo.dart",
+        "src/public.dart",
+        "main.g.dart",
+      ]);
     });
   });
 

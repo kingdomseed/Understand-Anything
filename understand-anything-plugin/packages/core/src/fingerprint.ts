@@ -121,6 +121,37 @@ export function extractFileFingerprint(
   };
 }
 
+function contentOnlyFingerprint(filePath: string, content: string): FileFingerprint {
+  return {
+    filePath,
+    contentHash: contentHash(content),
+    functions: [],
+    classes: [],
+    imports: [],
+    exports: [],
+    totalLines: content.split("\n").length,
+    hasStructuralAnalysis: false,
+  };
+}
+
+function hasUsableStructuralAnalysis(
+  filePath: string,
+  analysis: StructuralAnalysis | null | undefined,
+): analysis is StructuralAnalysis {
+  if (!analysis) return false;
+
+  // Dart is currently import-edge-only. Until the Dart extractor emits
+  // declarations, keep auto-update conservative so declaration edits do not
+  // get classified as cosmetic.
+  if (filePath.endsWith(".dart")) {
+    return analysis.functions.length > 0 ||
+      analysis.classes.length > 0 ||
+      analysis.exports.length > 0;
+  }
+
+  return true;
+}
+
 /**
  * Compare two file fingerprints and determine the change level.
  *
@@ -265,20 +296,11 @@ export function buildFingerprintStore(
     const content = readFileSync(absolutePath, "utf-8");
     const analysis = registry.analyzeFile(filePath, content);
 
-    if (analysis) {
+    if (hasUsableStructuralAnalysis(filePath, analysis)) {
       files[filePath] = extractFileFingerprint(filePath, content, analysis);
     } else {
       // No tree-sitter support: content hash only (conservative)
-      files[filePath] = {
-        filePath,
-        contentHash: contentHash(content),
-        functions: [],
-        classes: [],
-        imports: [],
-        exports: [],
-        totalLines: content.split("\n").length,
-        hasStructuralAnalysis: false,
-      };
+      files[filePath] = contentOnlyFingerprint(filePath, content);
     }
   }
 
@@ -342,20 +364,11 @@ export function analyzeChanges(
     const oldFp = existingStore.files[filePath];
 
     let newFp: FileFingerprint;
-    if (analysis) {
+    if (hasUsableStructuralAnalysis(filePath, analysis)) {
       newFp = extractFileFingerprint(filePath, content, analysis);
     } else {
       // No tree-sitter support: content hash only
-      newFp = {
-        filePath,
-        contentHash: contentHash(content),
-        functions: [],
-        classes: [],
-        imports: [],
-        exports: [],
-        totalLines: content.split("\n").length,
-        hasStructuralAnalysis: false,
-      };
+      newFp = contentOnlyFingerprint(filePath, content);
     }
 
     const result = compareFingerprints(oldFp, newFp);

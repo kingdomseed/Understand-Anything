@@ -284,11 +284,14 @@ function loadDartPackages(projectRoot, files) {
     } catch {
       continue;
     }
-    const match = raw.match(/^name:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/m);
+    const match = raw.match(
+      /^name:\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))\s*(?:#.*)?$/m,
+    );
     if (!match) continue;
+    const packageName = match[1] ?? match[2] ?? match[3];
     const packageDir = dirOf(p);
     const libDir = packageDir ? `${packageDir}/lib` : 'lib';
-    out.set(match[1], { packageDir, libDir });
+    out.set(packageName, { packageDir, libDir });
   }
   return out;
 }
@@ -558,9 +561,10 @@ function extractRequireSources(content) {
 // ---------------------------------------------------------------------------
 // Dart resolver
 //
-// Dart is not currently backed by a tree-sitter grammar in the core plugin,
-// so both source extraction and resolution live here. This is deterministic:
-// it resolves only literal `import`, `export`, and `part` URIs.
+// Dart source extraction normally comes from the core tree-sitter Dart
+// extractor. The regex helper below is retained only for explicitly warned
+// degraded mode when the Dart grammar cannot load. Resolution still lives here
+// because `package:` imports need the scanned pubspec.yaml package index.
 //
 // Supported:
 //   - relative: import '../src/foo.dart'
@@ -629,7 +633,10 @@ export function resolveDartImport(rawImport, file, ctx) {
     return resolved ? [resolved] : [];
   }
 
-  if (src.startsWith('./') || src.startsWith('../')) {
+  // Dart treats URI strings without a scheme as relative to the importing
+  // library, including bare forms such as `part 'foo.g.dart'` and
+  // `export 'src/foo.dart'`.
+  if (!src.includes(':')) {
     const base = resolveRelative(dirOf(toPosix(file.path)), src);
     const resolved = probeDartPath(base, ctx.fileSet);
     return resolved ? [resolved] : [];
@@ -1482,7 +1489,7 @@ function resolveImport(imp, file, ctx) {
  */
 function extractExtraImportSources(file, content) {
   if (file.language === 'dart') {
-    return extractDartSources(content);
+    return [];
   }
   if (TS_JS_LANGS.has(file.language)) {
     return extractRequireSources(content);
@@ -1527,6 +1534,17 @@ async function main() {
   // (file inventory, exports inferred from filenames, etc.) keeps working.
   let registry = null;
   let treeSitterReady = false;
+  let dartTreeSitterReady = false;
+  let dartFallbackWarned = false;
+  const hasDartFiles = files.some(f => f.language === 'dart' && f.fileCategory === 'code');
+  const warnDartFallback = (reason) => {
+    if (dartFallbackWarned) return;
+    dartFallbackWarned = true;
+    process.stderr.write(
+      `Warning: extract-import-map: tree-sitter-dart unavailable during import map phase ` +
+      `(${reason}) — using degraded Dart directive scanner — Dart graph edges may be incomplete\n`,
+    );
+  };
   try {
     const tsConfigs = builtinLanguageConfigs.filter(c => c.treeSitter);
     const tsPlugin = new TreeSitterPlugin(tsConfigs);
@@ -1535,6 +1553,13 @@ async function main() {
     registry.register(tsPlugin);
     registerAllParsers(registry);
     treeSitterReady = true;
+    if (hasDartFiles) {
+      const smoke = registry.analyzeFile('__ua_dart_smoke.dart', "import 'dart:async';\n");
+      dartTreeSitterReady = smoke?.imports?.some(imp => imp.source === 'dart:async') === true;
+      if (!dartTreeSitterReady) {
+        warnDartFallback('Dart grammar did not produce import directives');
+      }
+    }
   } catch (err) {
     process.stderr.write(
       `Warning: extract-import-map: tree-sitter init failed ` +
@@ -1597,7 +1622,8 @@ async function main() {
             if (out && ctx.fileSet.has(out)) resolvedSet.add(out);
           }
         }
-      } else if (file.language === 'dart') {
+      } else if (file.language === 'dart' && !dartTreeSitterReady) {
+        warnDartFallback('Dart grammar is not loaded');
         for (const extra of extractDartSources(content)) {
           for (const out of resolveDartImport(extra, file, ctx)) {
             if (out && ctx.fileSet.has(out)) {
