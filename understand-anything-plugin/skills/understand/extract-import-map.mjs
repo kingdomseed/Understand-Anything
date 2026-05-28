@@ -264,18 +264,50 @@ function loadGoModules(projectRoot, files) {
   return out;
 }
 
+function parsePubspecPackageName(raw) {
+  const match = raw.match(
+    /^name:\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))\s*(?:#.*)?$/m,
+  );
+  return match ? (match[1] ?? match[2] ?? match[3]) : null;
+}
+
 /**
  * Load Dart package roots from every pubspec.yaml in the scan inventory.
- * Returns Map<packageName, { packageDir, libDir }>. Dart `package:` imports
- * resolve through the target package's `lib/` directory, including app
- * packages in a monorepo.
+ * Returns Map<packageName, { packageDir, libDir }>. Also discovers nearest
+ * ancestor pubspec.yaml files for Dart code files, so a scoped code-only scan
+ * can still resolve `package:` imports across a monorepo.
  */
 function loadDartPackages(projectRoot, files) {
   const out = new Map();
+  const candidateDirs = new Set();
+
   for (const f of files) {
     const p = toPosix(f.path);
     const base = p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p;
-    if (base !== 'pubspec.yaml') continue;
+    if (base === 'pubspec.yaml') {
+      candidateDirs.add(dirOf(p));
+      continue;
+    }
+
+    if (f.language !== 'dart') continue;
+    const parts = dirOf(p).split('/').filter(Boolean);
+    for (let i = parts.length; i >= 0; i--) {
+      const candidateDir = parts.slice(0, i).join('/');
+      const pubspecPath = candidateDir ? `${candidateDir}/pubspec.yaml` : 'pubspec.yaml';
+      if (existsSync(join(projectRoot, pubspecPath))) {
+        candidateDirs.add(candidateDir);
+        break;
+      }
+    }
+  }
+
+  const sortedDirs = [...candidateDirs].sort((a, b) => {
+    const depth = a.split('/').filter(Boolean).length - b.split('/').filter(Boolean).length;
+    return depth === 0 ? a.localeCompare(b) : depth;
+  });
+
+  for (const packageDir of sortedDirs) {
+    const p = packageDir ? `${packageDir}/pubspec.yaml` : 'pubspec.yaml';
     const absPath = join(projectRoot, p);
     if (!existsSync(absPath)) continue;
     let raw;
@@ -284,12 +316,8 @@ function loadDartPackages(projectRoot, files) {
     } catch {
       continue;
     }
-    const match = raw.match(
-      /^name:\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))\s*(?:#.*)?$/m,
-    );
-    if (!match) continue;
-    const packageName = match[1] ?? match[2] ?? match[3];
-    const packageDir = dirOf(p);
+    const packageName = parsePubspecPackageName(raw);
+    if (!packageName) continue;
     const libDir = packageDir ? `${packageDir}/lib` : 'lib';
     out.set(packageName, { packageDir, libDir });
   }

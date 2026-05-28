@@ -424,6 +424,41 @@ describe('extract-import-map.mjs — Dart resolver', () => {
     ]);
   });
 
+  it('resolves Dart package imports from pubspecs discovered outside a code-only scan', () => {
+    projectRoot = setupTree({
+      'apps/my_app/pubspec.yaml': 'name: my_app\n',
+      'apps/my_app/lib/main.dart':
+        `import 'package:foo_repository/foo_repository.dart';\n` +
+        `import 'package:foo_repository/src/foo_repository.dart';\n` +
+        `import 'dart:async';\n` +
+        `void main() {}\n`,
+      'packages/foo_repository/pubspec.yaml': 'name: foo_repository\n',
+      'packages/foo_repository/lib/foo_repository.dart':
+        `export 'src/foo_repository.dart';\n`,
+      'packages/foo_repository/lib/src/foo_repository.dart':
+        `class FooRepository {}\n`,
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'apps/my_app/lib/main.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'packages/foo_repository/lib/foo_repository.dart', language: 'dart', fileCategory: 'code' },
+        { path: 'packages/foo_repository/lib/src/foo_repository.dart', language: 'dart', fileCategory: 'code' },
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/degraded Dart directive scanner/);
+    expect(result.output.importMap['apps/my_app/lib/main.dart']).toEqual([
+      'packages/foo_repository/lib/foo_repository.dart',
+      'packages/foo_repository/lib/src/foo_repository.dart',
+    ]);
+    expect(result.output.importMap['packages/foo_repository/lib/foo_repository.dart']).toEqual([
+      'packages/foo_repository/lib/src/foo_repository.dart',
+    ]);
+  });
+
   it('does not create Dart edges from comments or strings', () => {
     projectRoot = setupTree({
       'pubspec.yaml': 'name: demo_app\n',
