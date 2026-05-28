@@ -265,6 +265,35 @@ function loadGoModules(projectRoot, files) {
 }
 
 /**
+ * Load Dart package roots from every pubspec.yaml in the scan inventory.
+ * Returns Map<packageName, { packageDir, libDir }>. Dart `package:` imports
+ * resolve through the target package's `lib/` directory, including app
+ * packages in a monorepo.
+ */
+function loadDartPackages(projectRoot, files) {
+  const out = new Map();
+  for (const f of files) {
+    const p = toPosix(f.path);
+    const base = p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p;
+    if (base !== 'pubspec.yaml') continue;
+    const absPath = join(projectRoot, p);
+    if (!existsSync(absPath)) continue;
+    let raw;
+    try {
+      raw = readFileSync(absPath, 'utf-8');
+    } catch {
+      continue;
+    }
+    const match = raw.match(/^name:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/m);
+    if (!match) continue;
+    const packageDir = dirOf(p);
+    const libDir = packageDir ? `${packageDir}/lib` : 'lib';
+    out.set(match[1], { packageDir, libDir });
+  }
+  return out;
+}
+
+/**
  * Walk up from `startDir` (project-relative POSIX, '' for project root)
  * and return the DEEPEST ancestor directory that exists as a key in
  * `configMap`, or undefined if no ancestor matches.
@@ -298,6 +327,8 @@ function findNearestConfigDir(startDir, configMap) {
  *    `files[]`. Per-import resolution walks up from the importer to the
  *    nearest enclosing tsconfig.
  *  - goModules: Map<dir, moduleName> from every go.mod in `files[]`.
+ *  - dartPackages: Map<packageName, { packageDir, libDir }> from every
+ *    pubspec.yaml in `files[]`.
  *  - phpAutoloads: Map<dir, autoloadMap> from every composer.json in
  *    `files[]`. Resolved paths are anchored at the composer's directory.
  *  - goFilesByDir: Map<dir, string[]> of .go files per directory (built
@@ -310,6 +341,7 @@ function buildResolutionContext(projectRoot, files) {
   const fileSet = new Set(files.map(f => toPosix(f.path)));
   const tsConfigs = loadTsConfigs(projectRoot, files);
   const goModules = loadGoModules(projectRoot, files);
+  const dartPackages = loadDartPackages(projectRoot, files);
 
   // Index .go files by their parent directory so the Go resolver can
   // expand a package-level import to all member .go files in O(1).
@@ -338,6 +370,7 @@ function buildResolutionContext(projectRoot, files) {
     fileSet,
     tsConfigs,
     goModules,
+    dartPackages,
     goFilesByDir,
     javaIndex,
     kotlinIndex,
@@ -520,6 +553,89 @@ function extractRequireSources(content) {
     sources.push(m[2]);
   }
   return sources;
+}
+
+// ---------------------------------------------------------------------------
+// Dart resolver
+//
+// Dart is not currently backed by a tree-sitter grammar in the core plugin,
+// so both source extraction and resolution live here. This is deterministic:
+// it resolves only literal `import`, `export`, and `part` URIs.
+//
+// Supported:
+//   - relative: import '../src/foo.dart'
+//   - package:  import 'package:my_pkg/src/foo.dart'
+//   - part:     part 'foo.freezed.dart' (resolved only if scanned)
+//
+// Skipped as external/platform:
+//   - dart:*, package:* where package is not in the scan's pubspec index,
+//     asset:*, http(s):*, and dynamic/non-literal constructs.
+// ---------------------------------------------------------------------------
+
+const DART_DIRECTIVE_RE =
+  /^\s*(?:import|export|part)\s+(['"])([^'"\n]+)\1/gm;
+
+function stripDartComments(content) {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+}
+
+function extractDartSources(content) {
+  const sources = [];
+  const stripped = stripDartComments(content);
+  let m;
+  DART_DIRECTIVE_RE.lastIndex = 0;
+  while ((m = DART_DIRECTIVE_RE.exec(stripped)) !== null) {
+    sources.push(m[2]);
+  }
+  return sources;
+}
+
+const DART_EXT_PROBES = ['.dart', '/index.dart'];
+
+function probeDartPath(basePath, fileSet) {
+  if (!basePath) return null;
+  if (fileSet.has(basePath)) return basePath;
+  for (const ext of DART_EXT_PROBES) {
+    const candidate = basePath + ext;
+    if (fileSet.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function resolveDartImport(rawImport, file, ctx) {
+  if (!rawImport || typeof rawImport !== 'string') return [];
+  const src = rawImport.trim();
+  if (!src) return [];
+  if (
+    src.startsWith('dart:')
+    || src.startsWith('asset:')
+    || src.startsWith('http:')
+    || src.startsWith('https:')
+  ) {
+    return [];
+  }
+
+  if (src.startsWith('package:')) {
+    const rest = src.slice('package:'.length);
+    const slash = rest.indexOf('/');
+    if (slash <= 0) return [];
+    const packageName = rest.slice(0, slash);
+    const packagePath = rest.slice(slash + 1);
+    const pkg = ctx.dartPackages.get(packageName);
+    if (!pkg) return [];
+    const resolved = probeDartPath(posix.normalize(posix.join(pkg.libDir, packagePath)), ctx.fileSet);
+    return resolved ? [resolved] : [];
+  }
+
+  if (src.startsWith('./') || src.startsWith('../')) {
+    const base = resolveRelative(dirOf(toPosix(file.path)), src);
+    const resolved = probeDartPath(base, ctx.fileSet);
+    return resolved ? [resolved] : [];
+  }
+
+  return [];
 }
 
 /**
@@ -1322,6 +1438,9 @@ const TS_JS_LANGS = new Set([
 function resolveImport(imp, file, ctx) {
   const lang = file.language;
   const src = imp.source;
+  if (lang === 'dart') {
+    return resolveDartImport(src, file, ctx);
+  }
   if (TS_JS_LANGS.has(lang)) {
     const out = resolveTsJsImport(src, file, ctx);
     return out ? [out] : [];
@@ -1362,6 +1481,9 @@ function resolveImport(imp, file, ctx) {
  * import-source strings to be passed through resolveImport().
  */
 function extractExtraImportSources(file, content) {
+  if (file.language === 'dart') {
+    return extractDartSources(content);
+  }
   if (TS_JS_LANGS.has(file.language)) {
     return extractRequireSources(content);
   }
@@ -1473,6 +1595,14 @@ async function main() {
         for (const imp of parseRubyImports(content)) {
           for (const out of resolveRubyImport(imp, file, ctx)) {
             if (out && ctx.fileSet.has(out)) resolvedSet.add(out);
+          }
+        }
+      } else if (file.language === 'dart') {
+        for (const extra of extractDartSources(content)) {
+          for (const out of resolveDartImport(extra, file, ctx)) {
+            if (out && ctx.fileSet.has(out)) {
+              resolvedSet.add(out);
+            }
           }
         }
       } else {

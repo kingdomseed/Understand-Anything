@@ -105,8 +105,10 @@ export const ja = {
     backToDomains: "ドメインに戻る",
   },
   detailLevel: {
+    architectureTitle: "Dart/VGV の本番アーキテクチャ — テスト、ドキュメント、設定、生成ファイル、import 以外のエッジを非表示",
     filesTitle: "ファイルのみ — アーキテクチャレベルの依存関係（高速）",
     classesTitle: "ファイル + クラス — 継承を含むコード構造",
+    architecture: "アーキテクチャ",
     files: "ファイル",
     classes: "+クラス",
     fnTitle: "関数ノードを切り替え（レンダリングが遅くなる可能性）",

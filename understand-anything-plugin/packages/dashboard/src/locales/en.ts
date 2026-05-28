@@ -105,8 +105,10 @@ export const en = {
     backToDomains: "Back to domains",
   },
   detailLevel: {
+    architectureTitle: "Dart/VGV production architecture — hides tests, docs, config, generated files, and non-import edges",
     filesTitle: "Files only — architecture-level dependencies (fast)",
     classesTitle: "Files + Classes — code structure with inheritance",
+    architecture: "Architecture",
     files: "Files",
     classes: "+Classes",
     fnTitle: "Toggle function nodes (may slow down rendering)",

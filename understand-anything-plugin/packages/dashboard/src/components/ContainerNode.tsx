@@ -13,6 +13,7 @@ export interface ContainerNodeData extends Record<string, unknown> {
   searchHitCount?: number;
   isDiffAffected: boolean;
   isFocusedViaChild: boolean;
+  architectureIssueCount?: number;
   onToggle: (containerId: string) => void;
 }
 
@@ -23,10 +24,15 @@ function ContainerNodeComponent({ data, width, height }: NodeProps<ContainerFlow
 
   const borderColor = data.isDiffAffected
     ? "var(--color-diff-changed)"
+    : (data.architectureIssueCount ?? 0) > 0
+      ? "var(--color-diff-changed)"
     : data.isExpanded || data.isFocusedViaChild
       ? "rgba(212,165,116,0.6)"
       : "rgba(212,165,116,0.25)";
-  const borderWidth = data.isExpanded || data.isFocusedViaChild ? 1.5 : 1;
+  const borderWidth =
+    data.isExpanded || data.isFocusedViaChild || (data.architectureIssueCount ?? 0) > 0
+      ? 1.5
+      : 1;
 
   const labelDimmed = data.name === "~";
   const labelText = labelDimmed ? "(root)" : data.name;
@@ -86,6 +92,22 @@ function ContainerNodeComponent({ data, width, height }: NodeProps<ContainerFlow
               }}
             >
               {data.searchHitCount} hit{data.searchHitCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {(data.architectureIssueCount ?? 0) > 0 && (
+            <span
+              className="font-mono"
+              title={`${data.architectureIssueCount} architecture issue${data.architectureIssueCount !== 1 ? "s" : ""}`}
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                background: "rgba(224,82,82,0.22)",
+                color: "rgb(254,202,202)",
+                padding: "1px 6px",
+                borderRadius: 8,
+              }}
+            >
+              {data.architectureIssueCount}
             </span>
           )}
         </span>

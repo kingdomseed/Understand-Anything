@@ -105,8 +105,10 @@ export const zhTW = {
     backToDomains: "返回領域列表",
   },
   detailLevel: {
+    architectureTitle: "Dart/VGV 生產架構 — 隱藏測試、文件、配置、產生檔和非 import 邊",
     filesTitle: "僅檔案 — 架構級依賴（快速）",
     classesTitle: "檔案 + 類別 — 程式碼結構及繼承關係",
+    architecture: "架構",
     files: "檔案",
     classes: "+類別",
     fnTitle: "切換函數節點（可能降低渲染速度）",

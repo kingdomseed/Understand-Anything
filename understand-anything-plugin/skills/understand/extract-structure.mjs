@@ -101,6 +101,9 @@ async function main() {
     } catch {
       // If analysis throws, treat as degraded — still include basic metrics
     }
+    if (!analysis && file.language === 'dart') {
+      analysis = analyzeDartFile(content);
+    }
 
     // Call graph extraction (code files only)
     let callGraph = null;
@@ -301,6 +304,115 @@ export function buildResult(file, totalLines, nonEmptyLines, analysis, callGraph
   base.metrics = metrics;
 
   return base;
+}
+
+// ---------------------------------------------------------------------------
+// Dart structural extraction
+//
+// Core currently has no Dart tree-sitter grammar. Keep Dart first-class here
+// instead of returning empty metrics: extract top-level declarations,
+// classes/mixins/enums/extensions, and public exports deterministically from
+// literal source text.
+// ---------------------------------------------------------------------------
+
+function stripDartComments(content) {
+  return content
+    .replace(/\/\*[\s\S]*?\*\//g, match => ' '.repeat(match.length))
+    .replace(/\/\/[^\n]*/g, match => ' '.repeat(match.length));
+}
+
+function findBlockEndLine(lines, startIndex) {
+  let seenOpen = false;
+  let depth = 0;
+  for (let i = startIndex; i < lines.length; i++) {
+    for (const ch of lines[i]) {
+      if (ch === '{') {
+        seenOpen = true;
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+      }
+    }
+    if (seenOpen && depth <= 0) return i + 1;
+  }
+  return startIndex + 1;
+}
+
+function lineInRanges(lineNumber, ranges) {
+  return ranges.some(([start, end]) => lineNumber >= start && lineNumber <= end);
+}
+
+function analyzeDartFile(content) {
+  const stripped = stripDartComments(content);
+  const lines = stripped.split('\n');
+  const classes = [];
+  const functions = [];
+  const exports = [];
+  const classRanges = [];
+
+  const declarationRe =
+    /^\s*(?:abstract\s+|base\s+|final\s+|sealed\s+|interface\s+)?(?:class|mixin|enum|extension)\s+([A-Za-z_]\w*)/;
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(declarationRe);
+    if (!match) continue;
+    const name = match[1];
+    const startLine = i + 1;
+    const endLine = findBlockEndLine(lines, i);
+    const body = lines.slice(i, endLine).join('\n');
+    const methods = [];
+    const methodRe =
+      /^\s{2,}(?:static\s+)?(?:[A-Za-z_<>,?[\]\s]+\s+)?([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:async\s*)?\{/gm;
+    let methodMatch;
+    while ((methodMatch = methodRe.exec(body)) !== null) {
+      const methodName = methodMatch[1];
+      if (!['if', 'for', 'while', 'switch', 'catch'].includes(methodName)) {
+        methods.push(methodName);
+      }
+    }
+    classes.push({
+      name,
+      kind: 'class',
+      lineRange: [startLine, endLine],
+      methods: [...new Set(methods)],
+      properties: [],
+    });
+    classRanges.push([startLine, endLine]);
+    if (!name.startsWith('_')) {
+      exports.push({ name, lineNumber: startLine, isDefault: false });
+    }
+  }
+
+  const functionRe =
+    /^\s*(?:[A-Za-z_<>,?[\]\s]+\s+)?([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:async\s*)?\{/;
+  for (let i = 0; i < lines.length; i++) {
+    const lineNumber = i + 1;
+    if (lineInRanges(lineNumber, classRanges)) continue;
+    const match = lines[i].match(functionRe);
+    if (!match) continue;
+    const name = match[1];
+    if (['if', 'for', 'while', 'switch', 'catch', 'return'].includes(name)) continue;
+    const endLine = findBlockEndLine(lines, i);
+    functions.push({
+      name,
+      lineRange: [lineNumber, endLine],
+      params: [],
+    });
+    if (!name.startsWith('_')) {
+      exports.push({ name, lineNumber, isDefault: false });
+    }
+  }
+
+  return {
+    functions,
+    classes,
+    exports,
+    imports: [],
+    metrics: {
+      functionCount: functions.length,
+      classCount: classes.length,
+      exportCount: exports.length,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -105,8 +105,10 @@ export const ru = {
     backToDomains: "Назад к доменам",
   },
   detailLevel: {
+    architectureTitle: "Dart/VGV production architecture — hides tests, docs, config, generated files, and non-import edges",
     filesTitle: "Только файлы — зависимости архитектурного уровня (быстро)",
     classesTitle: "Файлы + классы — структура кода с наследованием",
+    architecture: "Architecture",
     files: "Файлы",
     classes: "+Классы",
     fnTitle: "Переключить узлы функций (может замедлить отрисовку)",

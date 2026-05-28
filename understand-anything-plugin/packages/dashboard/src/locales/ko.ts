@@ -105,8 +105,10 @@ export const ko = {
     backToDomains: "도메인으로 돌아가기",
   },
   detailLevel: {
+    architectureTitle: "Dart/VGV 프로덕션 아키텍처 — 테스트, 문서, 설정, 생성 파일, import가 아닌 엣지를 숨김",
     filesTitle: "파일만 — 아키텍처 레벨 의존성 (빠름)",
     classesTitle: "파일 + 클래스 — 상속 포함 코드 구조",
+    architecture: "아키텍처",
     files: "파일",
     classes: "+클래스",
     fnTitle: "함수 노드 토글 (렌더링 속도 저하 가능)",

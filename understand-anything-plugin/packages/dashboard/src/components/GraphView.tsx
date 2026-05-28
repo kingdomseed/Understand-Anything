@@ -53,6 +53,14 @@ import {
 import { deriveContainers } from "../utils/containers";
 import type { DerivedContainer } from "../utils/containers";
 import { computeLayerStats } from "../utils/layerStats";
+import {
+  analyzeDartArchitecture,
+  dartArchitectureEdgeKey,
+  deriveDartArchitectureContainers,
+  isDartArchitectureGraph,
+  isDartProductionArchitectureEdge,
+  isDartProductionNode,
+} from "../utils/dartArchitecture";
 
 const nodeTypes = {
   custom: CustomNode,
@@ -340,6 +348,8 @@ interface LayerDetailTopology {
   containers: DerivedContainer[];
   nodeToContainer: Map<string, string>;
   intraContainer: GraphEdge[];
+  architectureIssueCountByNodeId: Map<string, number>;
+  architectureViolationEdgeKeys: Set<string>;
 }
 
 const EMPTY_TOPOLOGY: LayerDetailTopology = {
@@ -352,6 +362,8 @@ const EMPTY_TOPOLOGY: LayerDetailTopology = {
   containers: [],
   nodeToContainer: new Map(),
   intraContainer: [],
+  architectureIssueCountByNodeId: new Map(),
+  architectureViolationEdgeKeys: new Set(),
 };
 
 /**
@@ -402,6 +414,18 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     const activeLayer = graph.layers.find((l) => l.id === activeLayerId);
     if (!activeLayer) return null;
+    const architectureView =
+      detailLevel === "architecture" && isDartArchitectureGraph(graph);
+    const architectureEdgePredicate = architectureView
+      ? (edge: GraphEdge) => isDartProductionArchitectureEdge(edge, nodesById)
+      : undefined;
+    const architectureDiagnostics = architectureView
+      ? analyzeDartArchitecture(graph.edges, nodesById)
+      : {
+          violations: [],
+          violationEdgeKeys: new Set<string>(),
+          issueCountByNodeId: new Map<string, number>(),
+        };
 
     const layerNodeIds = new Set(activeLayer.nodeIds);
 
@@ -410,7 +434,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     // File view: file nodes only (architecture-level dependencies).
     // Class view: file nodes + class nodes, functions only when toggle is on.
     const expandedLayerNodeIds = new Set(layerNodeIds);
-    if (detailLevel !== "file") {
+    if (detailLevel === "class") {
       for (const edge of graph.edges) {
         if (edge.type === "contains" && layerNodeIds.has(edge.source)) {
           const child = nodesById.get(edge.target);
@@ -435,6 +459,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     let filteredGraphNodes = graph.nodes.filter((n) => {
       if (!expandedLayerNodeIds.has(n.id)) return false;
+      if (architectureView) return isDartProductionNode(n);
       if (!allVisibleTypes.has(n.type)) return false;
       if (persona === "non-technical" && subFileTypes.has(n.type)) return false;
       return true;
@@ -453,9 +478,12 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     let filteredNodeIds = new Set(filteredGraphNodes.map((n) => n.id));
 
-    let filteredGraphEdges = graph.edges.filter(
-      (e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target),
-    );
+    let filteredGraphEdges = graph.edges.filter((e) => {
+      if (!filteredNodeIds.has(e.source) || !filteredNodeIds.has(e.target)) {
+        return false;
+      }
+      return architectureEdgePredicate ? architectureEdgePredicate(e) : true;
+    });
 
     // Focus mode: 1-hop neighborhood within the layer
     if (focusNodeId && filteredNodeIds.has(focusNodeId)) {
@@ -474,10 +502,9 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     }
 
     // Derive containers + bucket edges
-    const { containers, ungrouped } = deriveContainers(
-      filteredGraphNodes,
-      filteredGraphEdges,
-    );
+    const { containers, ungrouped } = architectureView
+      ? deriveDartArchitectureContainers(filteredGraphNodes)
+      : deriveContainers(filteredGraphNodes, filteredGraphEdges);
     const ungroupedSet = new Set(ungrouped);
     const nodeToContainer = new Map<string, string>();
     for (const c of containers) {
@@ -488,10 +515,31 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     for (const id of ungroupedSet) {
       nodeToContainer.set(id, id);
     }
+    const architectureIssueCountForNode = (nodeId: string) =>
+      architectureDiagnostics.issueCountByNodeId.get(nodeId) ?? 0;
+    const architectureIssueCountForNodes = (nodeIds: string[]) =>
+      nodeIds.reduce((sum, nodeId) => sum + architectureIssueCountForNode(nodeId), 0);
     const { intraContainer, interContainerAggregated } = aggregateContainerEdges(
       filteredGraphEdges,
       nodeToContainer,
     );
+
+    const architectureIssueCountByAtomPair = new Map<string, number>();
+    if (architectureView) {
+      for (const edge of filteredGraphEdges) {
+        if (!architectureDiagnostics.violationEdgeKeys.has(dartArchitectureEdgeKey(edge))) {
+          continue;
+        }
+        const sourceAtom = nodeToContainer.get(edge.source);
+        const targetAtom = nodeToContainer.get(edge.target);
+        if (!sourceAtom || !targetAtom || sourceAtom === targetAtom) continue;
+        const key = `${sourceAtom}->${targetAtom}`;
+        architectureIssueCountByAtomPair.set(
+          key,
+          (architectureIssueCountByAtomPair.get(key) ?? 0) + 1,
+        );
+      }
+    }
 
     // Container size estimate (size memory takes priority).
     // Caps prevent first-paint sprawl: at 100 children sqrt() yields
@@ -530,6 +578,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
         hasSearchHits: false,
         isDiffAffected: false, // Task 14 will populate this
         isFocusedViaChild: false,
+        architectureIssueCount: architectureIssueCountForNodes(c.nodeIds),
         onToggle: handleContainerToggle,
       },
     }));
@@ -556,6 +605,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
           isDiffFaded: diffMode && !changedNodeIds.has(node.id) && !affectedNodeIds.has(node.id),
           isNeighbor: false,
           isSelectionFaded: false,
+          architectureIssueCount: architectureIssueCountForNode(node.id),
           onNodeClick: handleNodeSelect,
         },
       }));
@@ -565,7 +615,15 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     // can't tell which underlying edges are impacted without expanding a
     // container, so just fade everything in diff mode at this stage).
     const aggEdges: Edge[] = interContainerAggregated.map((agg, i) => {
-      const baseStyle = diffMode
+      const architectureIssueCount =
+        architectureIssueCountByAtomPair.get(`${agg.sourceContainerId}->${agg.targetContainerId}`) ?? 0;
+      const hasArchitectureIssues = architectureIssueCount > 0;
+      const baseStyle = hasArchitectureIssues
+        ? {
+            stroke: "var(--color-diff-changed)",
+            strokeWidth: Math.min(2 + Math.log2(architectureIssueCount + 1), 5),
+          }
+        : diffMode
         ? { stroke: "rgba(212,165,116,0.08)", strokeWidth: 1 }
         : {
             stroke: "rgba(212,165,116,0.4)",
@@ -575,17 +633,26 @@ function useLayerDetailTopology(): LayerDetailTopology & {
         id: `agg-${i}`,
         source: agg.sourceContainerId,
         target: agg.targetContainerId,
-        label: String(agg.count),
+        label: hasArchitectureIssues
+          ? `${architectureIssueCount}/${agg.count}`
+          : String(agg.count),
         style: baseStyle,
         labelStyle: {
-          fill: diffMode ? "rgba(163,151,135,0.3)" : "#a39787",
+          fill: hasArchitectureIssues
+            ? "rgb(254,202,202)"
+            : diffMode ? "rgba(163,151,135,0.3)" : "#a39787",
           fontSize: 11,
         },
       };
     });
 
     // Portal nodes for connected external layers (unchanged)
-    const portals = computePortals(graph, activeLayerId);
+    const portals = computePortals(
+      graph,
+      activeLayerId,
+      undefined,
+      architectureEdgePredicate,
+    );
     const layerIndexMap = new Map(graph.layers.map((l, i) => [l.id, i]));
 
     const portalNodes: PortalFlowNode[] = portals.map((portal) => ({
@@ -604,7 +671,12 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     const portalEdges: Edge[] = [];
     let portalEdgeIdx = aggEdges.length;
     for (const portal of portals) {
-      const crossFiles = findCrossLayerFileNodes(graph, activeLayerId, portal.layerId);
+      const crossFiles = findCrossLayerFileNodes(
+        graph,
+        activeLayerId,
+        portal.layerId,
+        architectureEdgePredicate,
+      );
       // Dedupe by atom — multiple files in the same container hitting the
       // same portal collapse to one Stage 1 edge. Task 12 will re-route to
       // the actual file ids when the source container expands.
@@ -636,6 +708,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
       aggEdges,
       portalNodes,
       portalEdges,
+      architectureIssueCountByNodeId: architectureDiagnostics.issueCountByNodeId,
+      architectureViolationEdgeKeys: architectureDiagnostics.violationEdgeKeys,
     };
   }, [
     graph,
@@ -681,6 +755,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
       aggEdges,
       portalNodes,
       portalEdges,
+      architectureIssueCountByNodeId,
+      architectureViolationEdgeKeys,
     } = built;
 
     // Build Stage 1 ELK input: containers as opaque atoms + ungrouped files
@@ -758,6 +834,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
           containers,
           nodeToContainer,
           intraContainer,
+          architectureIssueCountByNodeId,
+          architectureViolationEdgeKeys,
         });
         setLayoutStatus("ready");
       })
@@ -914,6 +992,7 @@ function buildCustomFlowNode(
     changedNodeIds: Set<string>;
     affectedNodeIds: Set<string>;
     onNodeClick: (nodeId: string) => void;
+    architectureIssueCount?: number;
   },
 ): CustomFlowNode {
   return {
@@ -938,6 +1017,7 @@ function buildCustomFlowNode(
         !opts.affectedNodeIds.has(node.id),
       isNeighbor: false,
       isSelectionFaded: false,
+      architectureIssueCount: opts.architectureIssueCount,
       onNodeClick: opts.onNodeClick,
     },
   };
@@ -996,6 +1076,8 @@ function useLayerDetailGraph() {
           changedNodeIds,
           affectedNodeIds,
           onNodeClick: handleNodeSelect,
+          architectureIssueCount:
+            topo.architectureIssueCountByNodeId.get(node.id) ?? 0,
         });
         out.push({
           ...base,
@@ -1011,6 +1093,7 @@ function useLayerDetailGraph() {
     containerLayoutCache,
     topo.containers,
     topo.filteredNodes,
+    topo.architectureIssueCountByNodeId,
     diffMode,
     changedNodeIds,
     affectedNodeIds,
@@ -1222,13 +1305,21 @@ function useLayerDetailGraph() {
         const key = `${realSrc}|${realTgt}|${m.type}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        const hasArchitectureIssue = topo.architectureViolationEdgeKeys.has(
+          dartArchitectureEdgeKey(m),
+        );
         out.push({
           id: `inflated-${key}`,
           source: realSrc,
           target: realTgt,
           label: m.type,
-          style: { stroke: "rgba(212,165,116,0.5)", strokeWidth: 1.5 },
-          labelStyle: { fill: "#a39787", fontSize: 10 },
+          style: hasArchitectureIssue
+            ? { stroke: "var(--color-diff-changed)", strokeWidth: 2 }
+            : { stroke: "rgba(212,165,116,0.5)", strokeWidth: 1.5 },
+          labelStyle: {
+            fill: hasArchitectureIssue ? "rgb(254,202,202)" : "#a39787",
+            fontSize: 10,
+          },
         });
       }
     }
@@ -1240,13 +1331,21 @@ function useLayerDetailGraph() {
       const key = `intra|${e.source}|${e.target}|${e.type}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      const hasArchitectureIssue = topo.architectureViolationEdgeKeys.has(
+        dartArchitectureEdgeKey(e),
+      );
       out.push({
         id: key,
         source: e.source,
         target: e.target,
         label: e.type,
-        style: { stroke: "rgba(212,165,116,0.5)", strokeWidth: 1.5 },
-        labelStyle: { fill: "#a39787", fontSize: 10 },
+        style: hasArchitectureIssue
+          ? { stroke: "var(--color-diff-changed)", strokeWidth: 2 }
+          : { stroke: "rgba(212,165,116,0.5)", strokeWidth: 1.5 },
+        labelStyle: {
+          fill: hasArchitectureIssue ? "rgb(254,202,202)" : "#a39787",
+          fontSize: 10,
+        },
       });
     }
     return out;
@@ -1255,6 +1354,7 @@ function useLayerDetailGraph() {
     topo.filteredEdges,
     topo.intraContainer,
     topo.nodeToContainer,
+    topo.architectureViolationEdgeKeys,
     expandedContainers,
   ]);
 
@@ -1269,10 +1369,27 @@ function useLayerDetailGraph() {
       const isSelectedEdge = edge.source === selectedNodeId || edge.target === selectedNodeId;
       // Don't restyle diff-impacted or portal edges
       if ((edge.style as Record<string, unknown>)?.strokeDasharray) return edge;
+      const isArchitectureIssue =
+        (edge.style as Record<string, unknown>)?.stroke === "var(--color-diff-changed)";
 
       if (isSelectedEdge) {
-        return { ...edge, animated: true, style: { stroke: "rgba(212,165,116,0.8)", strokeWidth: 2.5 }, labelStyle: { fill: "#d4a574", fontSize: 11, fontWeight: 600 } };
+        return {
+          ...edge,
+          animated: true,
+          style: {
+            stroke: isArchitectureIssue
+              ? "var(--color-diff-changed)"
+              : "rgba(212,165,116,0.8)",
+            strokeWidth: 2.5,
+          },
+          labelStyle: {
+            fill: isArchitectureIssue ? "rgb(254,202,202)" : "#d4a574",
+            fontSize: 11,
+            fontWeight: 600,
+          },
+        };
       }
+      if (isArchitectureIssue) return edge;
       // Fade unrelated edges
       return { ...edge, animated: false, style: { stroke: "rgba(212,165,116,0.08)", strokeWidth: 1 }, labelStyle: { fill: "rgba(163,151,135,0.2)", fontSize: 10 } };
     });

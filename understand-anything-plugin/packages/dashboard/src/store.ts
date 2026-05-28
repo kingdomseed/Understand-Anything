@@ -8,6 +8,7 @@ import type {
   TourStep,
 } from "@understand-anything/core/types";
 import type { ReactFlowInstance } from "@xyflow/react";
+import { isDartArchitectureGraph } from "./utils/dartArchitecture";
 
 export type Persona = "non-technical" | "junior" | "experienced";
 export type NavigationLevel = "overview" | "layer-detail";
@@ -15,7 +16,7 @@ export type NodeType = "file" | "function" | "class" | "module" | "concept" | "c
 export type Complexity = "simple" | "moderate" | "complex";
 export type EdgeCategory = "structural" | "behavioral" | "data-flow" | "dependencies" | "semantic" | "infrastructure" | "domain" | "knowledge";
 export type ViewMode = "structural" | "domain" | "knowledge";
-export type DetailLevel = "file" | "class";
+export type DetailLevel = "architecture" | "file" | "class";
 
 export interface FilterState {
   nodeTypes: Set<NodeType>;
@@ -147,8 +148,8 @@ interface DashboardStore {
   nodeTypeFilters: Record<NodeCategory, boolean>;
   toggleNodeTypeFilter: (category: NodeCategory) => void;
 
-  // Detail level: "file" shows only file nodes (architecture view),
-  // "class" shows files + class nodes (code structure view) with optional function expansion.
+  // Detail level: "architecture" shows production Dart architecture,
+  // "file" shows raw file nodes, and "class" adds class/function nodes.
   detailLevel: DetailLevel;
   setDetailLevel: (level: DetailLevel) => void;
   showFunctionsInClassView: boolean;
@@ -339,7 +340,7 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       pendingFocusContainer: null,
     })),
 
-  detailLevel: "file",
+  detailLevel: "architecture",
   setDetailLevel: (level) =>
     set({
       detailLevel: level,
@@ -366,7 +367,18 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     const searchEngine = new SearchEngine(graph.nodes);
     const query = get().searchQuery;
     const searchResults = query.trim() ? searchEngine.search(query) : [];
-    const { viewMode, domainGraph, activeDomainId } = get();
+    const { viewMode, domainGraph, activeDomainId, detailLevel } = get();
+    const currentGraph = get().graph;
+    const graphSupportsArchitecture = isDartArchitectureGraph(graph);
+    const currentGraphSupportsArchitecture = currentGraph
+      ? isDartArchitectureGraph(currentGraph)
+      : false;
+    let nextDetailLevel = detailLevel;
+    if (graphSupportsArchitecture && !currentGraphSupportsArchitecture) {
+      nextDetailLevel = "architecture";
+    } else if (!graphSupportsArchitecture && detailLevel === "architecture") {
+      nextDetailLevel = "file";
+    }
     // Preserve domain view if a domain graph is already loaded
     const keepDomainView = viewMode === "domain" && domainGraph !== null;
     const { nodesById, nodeIdToLayerId, nodeIdToLayerIds } = buildGraphIndexes(graph);
@@ -375,6 +387,7 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       nodesById,
       nodeIdToLayerId,
       nodeIdToLayerIds,
+      detailLevel: nextDetailLevel,
       searchEngine,
       searchResults,
       navigationLevel: "overview",
@@ -781,4 +794,3 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     }),
   clearLayoutIssues: () => set({ layoutIssues: [] }),
 }));
-

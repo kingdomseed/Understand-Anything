@@ -77,6 +77,7 @@ export interface CustomNodeData extends Record<string, unknown> {
   incomingCount?: number;
   outgoingCount?: number;
   tags?: string[];
+  architectureIssueCount?: number;
 }
 
 export type CustomFlowNode = Node<CustomNodeData, "custom">;
@@ -120,6 +121,10 @@ function CustomNodeComponent({
     extraClass += " diff-faded";
   }
 
+  if ((data.architectureIssueCount ?? 0) > 0) {
+    extraClass += " ring-2 ring-[var(--color-diff-changed)]";
+  }
+
   // Selection-based dimming (when another node is selected, fade unrelated nodes)
   if (data.isSelectionFaded) {
     extraClass += " opacity-20 pointer-events-auto";
@@ -154,6 +159,14 @@ function CustomNodeComponent({
             {data.nodeType}
           </span>
           <div className="flex items-center gap-1.5">
+            {(data.architectureIssueCount ?? 0) > 0 && (
+              <span
+                className="rounded bg-red-900/50 px-1 py-0 text-[9px] font-semibold text-red-200"
+                title={`${data.architectureIssueCount} architecture issue${data.architectureIssueCount !== 1 ? "s" : ""}`}
+              >
+                {data.architectureIssueCount}
+              </span>
+            )}
             <span className={`text-[9px] font-mono ${complexityColor}`}>
               {data.complexity}
             </span>

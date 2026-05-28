@@ -24,6 +24,7 @@ import { ThemeProvider } from "./themes/index.ts";
 import { ThemePicker } from "./components/ThemePicker.tsx";
 import type { ThemeConfig } from "./themes/index.ts";
 import { I18nProvider, useI18n } from "./contexts/I18nContext.tsx";
+import { isDartArchitectureGraph } from "./utils/dartArchitecture.ts";
 
 // Lazy-load heavy / optional components so they ship in separate chunks.
 const CodeViewer = lazy(() => import("./components/CodeViewer"));
@@ -258,6 +259,7 @@ function DashboardContent({
   const layoutIssues = useDashboardStore((s) => s.layoutIssues);
   const isMobile = useIsMobile();
   const { t } = useI18n();
+  const showArchitectureDetail = !!graph && isDartArchitectureGraph(graph);
   const allIssues = useMemo(
     () => [...graphIssues, ...layoutIssues],
     [graphIssues, layoutIssues],
@@ -491,6 +493,20 @@ function DashboardContent({
               <>
                 <div className="w-px h-5 bg-border-subtle" />
                 <div className="flex items-center bg-elevated rounded-lg p-0.5">
+                  {showArchitectureDetail && (
+                    <button
+                      type="button"
+                      onClick={() => setDetailLevel("architecture")}
+                      title={t.detailLevel.architectureTitle}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                        detailLevel === "architecture"
+                          ? "bg-accent/20 text-accent"
+                          : "text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      {t.detailLevel.architecture}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setDetailLevel("file")}
